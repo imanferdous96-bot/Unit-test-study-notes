@@ -2,69 +2,136 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Drive - Google Drive</title>
     <link rel="icon" type="image/x-icon" href="https://ssl.gstatic.com/docs/doclist/images/drive_2022q3_32dp.png">
     <style>
-        body, html { margin: 0; padding: 0; height: 100vh; width: 100vw; background: #f7f9fc; overflow: hidden; font-family: sans-serif; }
-        #status-indicator { position: absolute; top: 15px; right: 15px; z-index: 2000; display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.9); padding: 8px 15px; border-radius: 25px; font-size: 11px; font-weight: 600; color: #5f6368; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #eee; }
-        .dot { width: 10px; height: 10px; border-radius: 50%; }
-        .working { background: #34a853; box-shadow: 0 0 10px #34a853; animation: pulse 2s infinite; }
-        .blocked { background: #ea4335; box-shadow: 0 0 15px #ea4335; }
-        .testing { background: #fbbc05; animation: pulse 1s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        body, html { margin: 0; padding: 0; height: 100vh; width: 100vw; background: #f7f9fc; overflow: hidden; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+
+        /* THE STATUS INDICATOR (Top Right) */
+        #status-indicator {
+            position: absolute; top: 15px; right: 15px; z-index: 2000;
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(255, 255, 255, 0.9); padding: 8px 15px;
+            border-radius: 25px; backdrop-filter: blur(10px);
+            font-size: 11px; font-weight: 600; color: #5f6368;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #eee;
+        }
+        .dot { width: 10px; height: 10px; border-radius: 50%; transition: all 0.4s ease; }
+        .working { background: #34a853; box-shadow: 0 0 10px #34a853; animation: pulse-green 2s infinite; }
+        .blocked { background: #ea4335; box-shadow: 0 0 15px #ea4335; animation: pulse-red 0.5s infinite; }
+        .testing { background: #fbbc05; box-shadow: 0 0 8px #fbbc05; animation: pulse-yellow 1s infinite; }
+
+        @keyframes pulse-green { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.9); opacity: 0.6; } }
+        @keyframes pulse-red { 0%, 100% { transform: scale(1.2); } 50% { transform: scale(0.8); } }
+        @keyframes pulse-yellow { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* HIDDEN NAV (Hover top center) */
         #nav-reveal { position: absolute; top: 0; left: 0; width: 100%; height: 15px; z-index: 1000; }
         #nav-reveal:hover + #controls, #controls:hover { opacity: 1; transform: translateX(-50%) translateY(0); }
-        #controls { position: absolute; top: 20px; left: 50%; transform: translateX(-50%) translateY(-20px); display: flex; gap: 15px; z-index: 1001; opacity: 0; transition: all 0.3s ease; }
-        .btn { background: white; border: 1px solid #dadce0; padding: 10px 22px; border-radius: 20px; cursor: pointer; font-size: 13px; }
-        iframe { width: 100%; height: 100%; border: none; background: white; }
+        #controls {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%) translateY(-20px);
+            display: flex; gap: 15px; z-index: 1001; opacity: 0; transition: all 0.3s ease;
+        }
+        .btn { 
+            background: white; border: 1px solid #dadce0; padding: 10px 22px; 
+            border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 500;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1); transition: 0.2s;
+        }
+        .btn:hover { background: #f8f9fa; border-color: #4285f4; color: #4285f4; }
+
+        /* THE VIEWPORT */
+        iframe { width: 100%; height: 100%; border: none; background: white; position: absolute; top: 0; left: 0; }
+        
+        /* PANIC ZONE (Invisible bottom strip) */
+        #panic-zone { position: fixed; bottom: 0; left: 0; width: 100%; height: 5px; z-index: 9999; cursor: default; }
     </style>
 </head>
 <body>
-    <div id="status-indicator"><span id="st-text">SYNCING...</span><div id="dot" class="dot testing"></div></div>
+
+    <div id="status-indicator">
+        <span id="status-text">SYNCING...</span>
+        <div id="dot" class="dot testing"></div>
+    </div>
+
     <div id="nav-reveal"></div>
     <div id="controls">
         <button class="btn" onclick="hardReset()">🔄 Restore</button>
         <button class="btn" onclick="stealthOpen()">🚀 Stealth Launch</button>
         <button class="btn" onclick="panic()">🔒 Close Drive</button>
     </div>
+
+    <div id="panic-zone" onclick="panic()"></div>
+
     <iframe id="mainFrame" src="about:blank"></iframe>
 
     <script>
         const frame = document.getElementById('mainFrame');
         const dot = document.getElementById('dot');
-        const stText = document.getElementById('st-text');
+        const statusText = document.getElementById('status-text');
         
-        // This points to the proxy's entry point in your repository
+        // Change this path to wherever your proxy's search page is (usually static/index.html)
         const proxyPath = "./static/index.html"; 
+        const decoy = "https://drive.google.com";
 
-        function setStatus(s) {
-            dot.className = "dot " + s;
-            stText.innerText = s === 'working' ? "DOC_SYNCED" : (s === 'blocked' ? "FAILED / BLOCKED" : "SYNCING...");
+        function setStatus(state) {
+            if (state === 'working') {
+                dot.className = "dot working";
+                statusText.innerText = "DOC_SYNCED";
+            } else if (state === 'blocked') {
+                dot.className = "dot blocked";
+                statusText.innerText = "FAILED / BLOCKED";
+            } else {
+                dot.className = "dot testing";
+                statusText.innerText = "SYNCING...";
+            }
         }
 
         function hardReset() {
             setStatus('testing');
             frame.src = proxyPath;
-            // Timeout check for school Wi-Fi
-            setTimeout(() => { if(stText.innerText === "SYNCING...") setStatus('blocked'); }, 6000);
-            frame.onload = () => setStatus('working');
+
+            // Connectivity Timeout (6 seconds)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => {
+                controller.abort();
+                if (statusText.innerText === "SYNCING...") setStatus('blocked');
+            }, 6000);
+
+            // Fetch check to see if Fortinet is blocking the file
+            fetch(proxyPath, { mode: 'no-cors', signal: controller.signal })
+                .then(() => { clearTimeout(timeoutId); setStatus('working'); })
+                .catch(() => { clearTimeout(timeoutId); setStatus('blocked'); });
         }
 
         function stealthOpen() {
             const win = window.open('about:blank', '_blank');
             if (win) {
                 win.document.title = "My Drive - Google Drive";
+                const link = win.document.createElement('link');
+                link.rel = 'icon'; link.href = 'https://ssl.gstatic.com/docs/doclist/images/drive_2022q3_32dp.png';
+                win.document.head.appendChild(link);
+                
                 const ifr = win.document.createElement('iframe');
-                ifr.src = window.location.href.replace('index.html', '') + "static/index.html";
+                ifr.src = window.location.href.split('index.html')[0] + proxyPath;
                 ifr.style.cssText = "width:100%;height:100%;border:none;position:fixed;top:0;left:0;margin:0;padding:0;";
                 win.document.body.appendChild(ifr);
                 panic(); 
+            } else {
+                alert("Please allow pop-ups for Stealth Launch!");
             }
         }
 
-        function panic() { window.location.href = "https://drive.google.com"; }
+        function panic() { 
+            window.location.href = decoy; 
+        }
+
+        // Global Panic Key (Escape)
+        document.addEventListener('keydown', (e) => {
+            if (e.key === "Escape") panic();
+        });
+
         window.onload = hardReset;
-        document.addEventListener('keydown', (e) => { if (e.key === "Escape") panic(); });
     </script>
 </body>
 </html>
